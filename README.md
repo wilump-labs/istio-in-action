@@ -267,3 +267,92 @@ spec:
           ports:
             - containerPort: 80
 ```
+
+## 트래픽 라우팅
+`/etc/hosts` 파일을 수정해서 localhost 수정
+```shell
+##
+# Host Database
+#
+# localhost is used to configure the loopback interface
+# when the system is booting.  Do not change this entry.
+##
+127.0.0.1       localhost
+255.255.255.255 broadcasthost
+::1             localhost
+# Added by Docker Desktop
+# To allow the same kube context to work on the host and the container:
+127.0.0.1 kubernetes.docker.internal
+127.0.0.1 test.wilump.dev
+# End of section
+```
+
+#### 확인
+```shell
+curl -XGET test.wilump.dev -v
+```
+
+### istio 기본 리소스
+#### Gateway
+```yaml
+# sample-gateway
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: sample-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default ingress gateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*"
+```
+- 프로토콜 및 Gateway 포트 설정
+- 요청 받고자 하는 hosts 등록 가능
+- TLS 관련 옵션 추가 기능
+- 실행하고자하는 워크로드 proxy에 설정도 가능
+- protocol selection: https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
+
+#### VirtualService
+https://istio.io/latest/docs/reference/config/networking/virtual-service/
+```yaml
+# sample-virtual-service.yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: sample-virtual-service
+spec:
+  hosts:
+    - "test.wilump.dev"
+  gateways:
+    - sample-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /sample
+      route:
+        - destination:
+            host: sample-service
+            port:
+              number: 80
+```
+- kubernetes가 L4 역할까지 못 함. VirtualService를 통해 L7 layer의 고차원 로드밸런싱을 지원 (e.g. path 별 라우팅)
+- `spec.hosts`에 처리할 트래픽 hosts 등록
+- 목적지에 대한 정책을 포함
+
+## Troubleshooting
+### Minikkube에서 Istio Ingressgateway의 external IP가 pending 상태
+external ip를 제공하는 퍼블릭 클라우드 제공자 (AWS, Azure GCP등) 에서 kubernates를 서비스 형으로 사용 하는경우에는 문제가 되지 않으나 로컬에 minikube이나 kubeadm 등으로 설치 한 경우는 해당 현상이 발생
+- docker desktop은 발생하지 않음
+
+minikube의 경우 별도의 터미널을 더 열어서 minikube tunnel 명령어를 사용하면 LoadBalancer type의 서비스를 사용 가능
+
+```shell
+$ minikube tunnel
+```
+
+- https://www.nakjunizm.com/2021/10/05/Minikube_ExternalIP_Pending
